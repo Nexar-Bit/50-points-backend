@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -11,6 +13,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from app.config import BACKEND_ROOT, settings
+from app.database import SessionLocal
 from app.models import Horse, Race, Tournament
 from app.services.racing_fetch import US_TRACKS, build_tournament_payload, fetch_public_track_racecards
 
@@ -18,13 +21,72 @@ logger = logging.getLogger(__name__)
 
 SYNC_META_PATH = BACKEND_ROOT / "data" / "last_racing_sync.json"
 SYNC_TRACKS = ("gulfstream-park", "santa-anita", "churchill-downs")
-SYNC_TTL_SECONDS = 120  # background auto-sync at most every 2 minutes
+SYNC_TTL_SECONDS = 5  # fallback when background sync is off
 
 _last_source = "database"
+_sync_lock = threading.Lock()
+_background_task: asyncio.Task | None = None
 
 
 def get_last_data_source() -> str:
     return _last_source
+
+
+def get_sync_status() -> dict:
+    meta = _read_sync_meta()
+    return {
+        "syncedAt": meta.get("syncedAt"),
+        "dataSource": meta.get("dataSource") or get_last_data_source(),
+        "intervalSeconds": settings.racing_sync_interval_seconds,
+        "backgroundSync": settings.racing_background_sync,
+    }
+
+
+def run_sync_job() -> dict:
+    """One scrape cycle (thread-safe, skips if previous cycle still running)."""
+    if not _sync_lock.acquire(blocking=False):
+        return {"synced": False, "reason": "sync_in_progress", "dataSource": get_last_data_source()}
+
+    db = SessionLocal()
+    try:
+        return sync_live_tournaments(db, force=True)
+    finally:
+        db.close()
+        _sync_lock.release()
+
+
+async def background_sync_loop() -> None:
+    """Scrape racecards every few seconds while the API process is running."""
+    interval = max(5, settings.racing_sync_interval_seconds)
+    await asyncio.sleep(1)
+    logger.info("Racing background sync started (every %ss)", interval)
+
+    while True:
+        try:
+            await asyncio.to_thread(run_sync_job)
+        except asyncio.CancelledError:
+            logger.info("Racing background sync stopped")
+            raise
+        except Exception:
+            logger.exception("Background racing sync failed")
+        await asyncio.sleep(interval)
+
+
+def start_background_sync() -> asyncio.Task:
+    global _background_task
+    if not settings.racing_background_sync:
+        return None
+    if _background_task and not _background_task.done():
+        return _background_task
+    _background_task = asyncio.create_task(background_sync_loop())
+    return _background_task
+
+
+def stop_background_sync() -> None:
+    global _background_task
+    if _background_task and not _background_task.done():
+        _background_task.cancel()
+    _background_task = None
 
 
 def _read_sync_meta() -> dict:

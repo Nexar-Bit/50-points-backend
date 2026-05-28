@@ -23,6 +23,13 @@ class Settings:
     environment: str = os.getenv("ENVIRONMENT", "development")
     racing_api_username: str | None = os.getenv("RACING_API_USERNAME") or os.getenv("RACING_API_KEY")
     racing_api_password: str | None = os.getenv("RACING_API_PASSWORD", "")
+    racing_sync_interval_seconds: int = int(os.getenv("RACING_SYNC_INTERVAL_SECONDS", "8"))
+    racing_background_sync: bool = os.getenv("RACING_BACKGROUND_SYNC", "true").lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
 
     @property
     def cors_origin_list(self) -> list[str]:

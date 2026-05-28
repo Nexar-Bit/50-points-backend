@@ -7,20 +7,69 @@ from fastapi.responses import JSONResponse
 
 from app.config import settings
 from app.database import Base, SessionLocal, engine
-from app.models import Horse, LeaderboardEntry, Race, RaceResult, Ticket, Tournament, User, UserStats  # noqa: F401
+from app.models import (  # noqa: F401
+    AchievementCard,
+    Horse,
+    LeaderboardEntry,
+    Race,
+    RaceResult,
+    Ticket,
+    Tournament,
+    User,
+    UserStats,
+)
 from app.routers import admin, auth, leaderboard, profile, races, tickets, tournaments
 from app.seed import ensure_seeded_if_empty
+from app.services.tournament_sync import run_sync_job, start_background_sync, stop_background_sync
+
+
+def _ensure_leaderboard_columns():
+    """SQLite dev DB: add rank snapshot columns if missing."""
+    from sqlalchemy import inspect, text
+
+    try:
+        insp = inspect(engine)
+        if "LeaderboardEntry" not in insp.get_table_names():
+            return
+        cols = {c["name"] for c in insp.get_columns("LeaderboardEntry")}
+        alters = []
+        if "previousRank" not in cols:
+            alters.append("ALTER TABLE LeaderboardEntry ADD COLUMN previousRank INTEGER")
+        if "rankChange" not in cols:
+            alters.append("ALTER TABLE LeaderboardEntry ADD COLUMN rankChange INTEGER DEFAULT 0")
+        if "lastPointsChange" not in cols:
+            alters.append("ALTER TABLE LeaderboardEntry ADD COLUMN lastPointsChange INTEGER DEFAULT 0")
+        if not alters:
+            return
+        with engine.begin() as conn:
+            for sql in alters:
+                conn.execute(text(sql))
+    except Exception:
+        pass
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     Base.metadata.create_all(bind=engine)
+    _ensure_leaderboard_columns()
     db = SessionLocal()
     try:
         ensure_seeded_if_empty(db)
     finally:
         db.close()
+
+    await __import__("asyncio").to_thread(run_sync_job)
+    sync_task = start_background_sync()
+
     yield
+
+    stop_background_sync()
+    if sync_task and not sync_task.done():
+        sync_task.cancel()
+        try:
+            await sync_task
+        except Exception:
+            pass
 
 
 app = FastAPI(title="50points API", version="1.0.0", lifespan=lifespan)

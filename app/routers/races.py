@@ -8,6 +8,7 @@ from app.auth_utils import require_admin
 from app.database import get_db
 from app.models import LeaderboardEntry, Race, RaceResult, Ticket, Tournament, UserStats
 from app.scoring import score_ticket
+from app.services.leaderboard_snapshot import refresh_tournament_rank_changes
 
 router = APIRouter(prefix="/races", tags=["races"])
 
@@ -77,6 +78,7 @@ def post_race_result(race_id: int, results: list, db: Session):
             else:
                 entry.winStreak = 0
             entry.bestStreak = max(entry.bestStreak, entry.winStreak)
+            entry.lastPointsChange = points
         else:
             entry = LeaderboardEntry(
                 userId=ticket.userId,
@@ -90,6 +92,7 @@ def post_race_result(race_id: int, results: list, db: Session):
                 winStreak=1 if points > 0 else 0,
                 bestStreak=1 if points > 0 else 0,
             )
+            entry.lastPointsChange = points
             db.add(entry)
 
         stats = db.query(UserStats).filter(UserStats.userId == ticket.userId).first()
@@ -137,6 +140,7 @@ def post_race_result(race_id: int, results: list, db: Session):
         tournament.status = "finished"
         tournament.currentRace = race.raceNumber
 
+    refresh_tournament_rank_changes(db, race.tournamentId)
     db.commit()
 
     return {

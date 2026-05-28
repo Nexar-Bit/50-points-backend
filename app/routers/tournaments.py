@@ -7,14 +7,27 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.database import get_db
 from app.models import Horse, LeaderboardEntry, Race, RaceResult, Ticket, Tournament, User
+from app.services.leaderboard_snapshot import (
+    dominant_strategy_key,
+    get_recent_plays,
+    refresh_tournament_rank_changes,
+)
+
+STRATEGY_LABELS = {
+    "full_point": "FULL POINT",
+    "dual_point": "DUAL POINT",
+    "smart_pick": "SMART POINT",
+}
 from app.seed import ensure_seeded_if_empty
 from app.services.tournament_display import (
     dedupe_tournaments_by_track,
     prepare_home_tournaments,
     sort_tournaments_for_display,
 )
+from app.config import settings
 from app.services.tournament_sync import (
     get_last_data_source,
+    get_sync_status,
     should_auto_sync,
     sync_live_tournaments,
     track_id_from_slug,
@@ -40,7 +53,11 @@ def list_tournaments(
     db: Session = Depends(get_db),
 ):
     sync_result = None
-    if refresh or should_auto_sync(db):
+    # Background loop scrapes every ~8s; only scrape on request when refresh=1 or fallback mode.
+    needs_sync = refresh or (
+        not settings.racing_background_sync and should_auto_sync(db)
+    )
+    if needs_sync:
         try:
             sync_result = sync_live_tournaments(db, force=refresh)
         except Exception as exc:
@@ -109,6 +126,7 @@ def list_tournaments(
         "tournaments": items,
         "dataSource": get_last_data_source(),
         "refreshed": bool(refresh),
+        "syncStatus": get_sync_status(),
         **meta,
     }
 
@@ -220,25 +238,66 @@ def tournament_leaderboard(
         LeaderboardEntry.racesPlayed.desc(),
     ).all()
 
+    refresh_tournament_rank_changes(db, t.id)
+
+    by_user: dict[int, dict] = {}
+    for entry, user in rows:
+        uid = user.id
+        strategy_key = dominant_strategy_key(entry)
+        recent_plays = get_recent_plays(db, uid, t.id, entry.ticketNumber)
+        row_payload = {
+            "userId": uid,
+            "username": user.username,
+            "avatarColor": user.avatarColor,
+            "isGuest": user.isGuest,
+            "gameMode": user.gameMode,
+            "ticketNumber": entry.ticketNumber,
+            "totalPoints": entry.totalPoints,
+            "racesPlayed": entry.racesPlayed,
+            "fullPoints": entry.fullPoints,
+            "dualPoints": entry.dualPoints,
+            "smartPoints": entry.smartPoints,
+            "winStreak": entry.winStreak,
+            "bestStreak": entry.bestStreak,
+            "rankChange": entry.rankChange or 0,
+            "lastPointsChange": entry.lastPointsChange or 0,
+            "activeMode": STRATEGY_LABELS.get(strategy_key, strategy_key.upper()),
+            "activeModeKey": strategy_key,
+            "recentPlays": recent_plays,
+            "updatedAt": entry.updatedAt.isoformat() if entry.updatedAt else None,
+        }
+        existing = by_user.get(uid)
+        if not existing or entry.totalPoints > existing["totalPoints"]:
+            by_user[uid] = row_payload
+
+    sorted_users = sorted(
+        by_user.values(),
+        key=lambda x: (-x["totalPoints"], -x["winStreak"], -x["racesPlayed"]),
+    )
+
     leaderboard = []
+    for rank, row in enumerate(sorted_users, start=1):
+        leaderboard.append({**row, "rank": rank})
+
+    ticket_entries = []
     for rank, (entry, user) in enumerate(rows, start=1):
-        leaderboard.append(
+        strategy_key = dominant_strategy_key(entry)
+        ticket_entries.append(
             {
                 "rank": rank,
                 "userId": user.id,
                 "username": user.username,
-                "avatarColor": user.avatarColor,
-                "isGuest": user.isGuest,
-                "gameMode": user.gameMode,
                 "ticketNumber": entry.ticketNumber,
                 "totalPoints": entry.totalPoints,
-                "racesPlayed": entry.racesPlayed,
-                "fullPoints": entry.fullPoints,
-                "dualPoints": entry.dualPoints,
-                "smartPoints": entry.smartPoints,
                 "winStreak": entry.winStreak,
-                "bestStreak": entry.bestStreak,
+                "activeModeKey": strategy_key,
             }
         )
 
-    return {"leaderboard": leaderboard, "tournamentName": t.name}
+    db.commit()
+    return {
+        "leaderboard": leaderboard,
+        "ticketEntries": ticket_entries,
+        "tournamentName": t.name,
+        "tournamentSlug": t.slug,
+    }

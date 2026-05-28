@@ -134,6 +134,9 @@ class LeaderboardEntry(Base):
     winStreak: Mapped[int] = mapped_column(Integer, default=0)
     bestStreak: Mapped[int] = mapped_column(Integer, default=0)
     rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    previousRank: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    rankChange: Mapped[int] = mapped_column(Integer, default=0)
+    lastPointsChange: Mapped[int] = mapped_column(Integer, default=0)
     updatedAt: Mapped[datetime] = mapped_column(PrismaDateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
@@ -152,3 +155,14 @@ class UserStats(Base):
     updatedAt: Mapped[datetime] = mapped_column(PrismaDateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     user: Mapped["User"] = relationship(back_populates="stats")
+
+
+class AchievementCard(Base):
+    __tablename__ = "AchievementCard"
+    __table_args__ = (UniqueConstraint("userId", "cardId"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    userId: Mapped[int] = mapped_column(ForeignKey("User.id"))
+    cardId: Mapped[str] = mapped_column(String)
+    payload: Mapped[str] = mapped_column(String)
+    earnedAt: Mapped[datetime] = mapped_column(PrismaDateTime, default=datetime.utcnow)
