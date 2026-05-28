@@ -96,6 +96,13 @@ def _shuffle(arr):
     return a
 
 
+def ensure_seeded_if_empty(db) -> dict | None:
+    """Populate demo tournaments when the database has none (e.g. fresh Render deploy)."""
+    if db.query(Tournament).count() > 0:
+        return None
+    return run_seed(db)
+
+
 def run_seed(db):
     for model in (RaceResult, Ticket, LeaderboardEntry, UserStats, Horse, Race, Tournament, User):
         db.query(model).delete()

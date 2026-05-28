@@ -3,10 +3,11 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.database import get_db
 from app.models import Horse, LeaderboardEntry, Race, RaceResult, Ticket, Tournament, User
+from app.seed import ensure_seeded_if_empty
 from app.services.tournament_sync import get_last_data_source, should_auto_sync, sync_live_tournaments
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,8 @@ def list_tournaments(
         except Exception as exc:
             logger.exception("Public racing sync failed: %s", exc)
             db.rollback()
+
+    ensure_seeded_if_empty(db)
 
     tournaments = (
         db.query(Tournament)

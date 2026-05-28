@@ -1,17 +1,34 @@
 import traceback
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import settings
+from app.database import Base, SessionLocal, engine
+from app.models import Horse, LeaderboardEntry, Race, RaceResult, Ticket, Tournament, User, UserStats  # noqa: F401
 from app.routers import admin, auth, leaderboard, profile, races, tickets, tournaments
+from app.seed import ensure_seeded_if_empty
 
-app = FastAPI(title="50points API", version="1.0.0")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    Base.metadata.create_all(bind=engine)
+    db = SessionLocal()
+    try:
+        ensure_seeded_if_empty(db)
+    finally:
+        db.close()
+    yield
+
+
+app = FastAPI(title="50points API", version="1.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
+    allow_origin_regex=settings.cors_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

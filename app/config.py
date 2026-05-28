@@ -14,7 +14,11 @@ class Settings:
     jwt_secret: str = os.getenv("JWT_SECRET", "50points-secret-key")
     admin_secret: str | None = os.getenv("ADMIN_SECRET")
     cors_origins: str = os.getenv(
-        "CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"
+        "CORS_ORIGINS",
+        "http://localhost:3000,http://127.0.0.1:3000,https://50-points.vercel.app",
+    )
+    cors_origin_regex: str | None = os.getenv(
+        "CORS_ORIGIN_REGEX", r"https://.*\.vercel\.app"
     )
     environment: str = os.getenv("ENVIRONMENT", "development")
     racing_api_username: str | None = os.getenv("RACING_API_USERNAME") or os.getenv("RACING_API_KEY")
