@@ -1,0 +1,148 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  username     String   @unique
+  email        String?  @unique
+  passwordHash String?
+  isGuest      Boolean  @default(false)
+  guestToken   String?  @unique
+  avatarColor  String   @default("#7c3aed")
+  gameMode     Int      @default(2)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tickets            Ticket[]
+  leaderboardEntries LeaderboardEntry[]
+  stats              UserStats?
+}
+
+model Tournament {
+  id          Int      @id @default(autoincrement())
+  slug        String   @unique
+  name        String
+  track       String
+  location    String
+  status      String   @default("upcoming")
+  totalRaces  Int
+  currentRace Int      @default(0)
+  date        DateTime
+  description String?
+  imageUrl    String?
+  createdAt   DateTime @default(now())
+
+  races              Race[]
+  tickets            Ticket[]
+  leaderboardEntries LeaderboardEntry[]
+}
+
+model Race {
+  id            Int      @id @default(autoincrement())
+  tournamentId  Int
+  raceNumber    Int
+  name          String?
+  status        String   @default("upcoming")
+  scheduledTime String?
+  distance      Int?
+  surface       String?
+  raceClass     String?
+  purse         Int?
+  createdAt     DateTime @default(now())
+
+  tournament Tournament   @relation(fields: [tournamentId], references: [id])
+  horses     Horse[]
+  tickets    Ticket[]
+  results    RaceResult[]
+
+  @@unique([tournamentId, raceNumber])
+}
+
+model Horse {
+  id            Int    @id @default(autoincrement())
+  raceId        Int
+  postPosition  Int
+  name          String
+  jockey        String?
+  trainer       String?
+  odds          Float
+  silkPrimary   String?
+  silkSecondary String?
+
+  race    Race         @relation(fields: [raceId], references: [id])
+  results RaceResult[]
+}
+
+model RaceResult {
+  id       Int @id @default(autoincrement())
+  raceId   Int
+  horseId  Int
+  position Int
+
+  race  Race  @relation(fields: [raceId], references: [id])
+  horse Horse @relation(fields: [horseId], references: [id])
+
+  @@unique([raceId, position])
+  @@unique([raceId, horseId])
+}
+
+model Ticket {
+  id           Int      @id @default(autoincrement())
+  userId       Int
+  raceId       Int
+  tournamentId Int
+  ticketNumber Int      @default(1)
+  strategy     String
+  picks        String
+  pointsEarned Int      @default(0)
+  isScored     Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  user       User       @relation(fields: [userId], references: [id])
+  race       Race       @relation(fields: [raceId], references: [id])
+  tournament Tournament @relation(fields: [tournamentId], references: [id])
+
+  @@unique([userId, raceId, ticketNumber])
+}
+
+model LeaderboardEntry {
+  id           Int      @id @default(autoincrement())
+  userId       Int
+  tournamentId Int
+  ticketNumber Int      @default(1)
+  totalPoints  Int      @default(0)
+  racesPlayed  Int      @default(0)
+  fullPoints   Int      @default(0)
+  dualPoints   Int      @default(0)
+  smartPoints  Int      @default(0)
+  winStreak    Int      @default(0)
+  bestStreak   Int      @default(0)
+  rank         Int?
+  updatedAt    DateTime @updatedAt
+
+  user       User       @relation(fields: [userId], references: [id])
+  tournament Tournament @relation(fields: [tournamentId], references: [id])
+
+  @@unique([userId, tournamentId, ticketNumber])
+}
+
+model UserStats {
+  id                Int      @id @default(autoincrement())
+  userId            Int      @unique
+  totalPoints       Int      @default(0)
+  tournamentsPlayed Int      @default(0)
+  totalRaces        Int      @default(0)
+  winRate           Float    @default(0)
+  bestStreak        Int      @default(0)
+  titles            Int      @default(0)
+  records           Int      @default(0)
+  updatedAt         DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+}
