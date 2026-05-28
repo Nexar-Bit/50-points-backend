@@ -8,7 +8,17 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from app.database import get_db
 from app.models import Horse, LeaderboardEntry, Race, RaceResult, Ticket, Tournament, User
 from app.seed import ensure_seeded_if_empty
-from app.services.tournament_sync import get_last_data_source, should_auto_sync, sync_live_tournaments
+from app.services.tournament_display import (
+    dedupe_tournaments_by_track,
+    prepare_home_tournaments,
+    sort_tournaments_for_display,
+)
+from app.services.tournament_sync import (
+    get_last_data_source,
+    should_auto_sync,
+    sync_live_tournaments,
+    track_id_from_slug,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,11 +36,13 @@ def _iso_datetime(value) -> str | None:
 @router.get("")
 def list_tournaments(
     refresh: bool = Query(default=False),
+    for_home: bool = Query(default=False, description="Dedupe by track and return top live/upcoming cards"),
     db: Session = Depends(get_db),
 ):
+    sync_result = None
     if refresh or should_auto_sync(db):
         try:
-            sync_live_tournaments(db, force=refresh)
+            sync_result = sync_live_tournaments(db, force=refresh)
         except Exception as exc:
             logger.exception("Public racing sync failed: %s", exc)
             db.rollback()
@@ -82,11 +94,42 @@ def list_tournaments(
                 ],
             }
         )
-    return {"tournaments": out, "dataSource": get_last_data_source()}
+
+    if for_home:
+        items = prepare_home_tournaments(out)
+    else:
+        items = sort_tournaments_for_display(dedupe_tournaments_by_track(out))
+
+    meta = {}
+    if sync_result:
+        meta["synced"] = sync_result.get("synced")
+        meta["syncErrors"] = sync_result.get("errors") or []
+
+    return {
+        "tournaments": items,
+        "dataSource": get_last_data_source(),
+        "refreshed": bool(refresh),
+        **meta,
+    }
 
 
 @router.get("/{slug}")
-def get_tournament(slug: str, db: Session = Depends(get_db)):
+def get_tournament(
+    slug: str,
+    refresh: bool = Query(default=False),
+    db: Session = Depends(get_db),
+):
+    if refresh:
+        track_id = track_id_from_slug(slug)
+        try:
+            if track_id:
+                sync_live_tournaments(db, tracks=(track_id,), force=True)
+            else:
+                sync_live_tournaments(db, force=True)
+        except Exception as exc:
+            logger.exception("Tournament refresh sync failed for %s: %s", slug, exc)
+            db.rollback()
+
     t = (
         db.query(Tournament)
         .options(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -17,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 SYNC_META_PATH = BACKEND_ROOT / "data" / "last_racing_sync.json"
 SYNC_TRACKS = ("gulfstream-park", "santa-anita", "churchill-downs")
-SYNC_TTL_SECONDS = 900  # 15 minutes
+SYNC_TTL_SECONDS = 120  # background auto-sync at most every 2 minutes
 
 _last_source = "database"
 
@@ -53,8 +54,29 @@ def should_auto_sync(db: Session) -> bool:
         return True
 
 
-def _prisma_ms(dt: datetime) -> int:
-    return int(dt.timestamp() * 1000)
+def track_id_from_slug(slug: str) -> str | None:
+    for track_id in US_TRACKS:
+        if slug.startswith(track_id):
+            return track_id
+    return None
+
+
+def _fetch_track_payload(
+    track_id: str,
+    day: str,
+    api_user: str | None,
+    api_pass: str,
+) -> tuple[str, dict | None, str | None]:
+    """Fetch one track (runs in a worker thread). Returns (track_id, payload, error)."""
+    try:
+        races, source = fetch_public_track_racecards(track_id, day, api_user, api_pass)
+        if not races:
+            return track_id, None, f"{track_id}: no races"
+        payload = build_tournament_payload(track_id, races, day, source)
+        return track_id, payload, None
+    except Exception as exc:
+        logger.exception("Sync failed for %s", track_id)
+        return track_id, None, f"{track_id}: {exc}"
 
 
 def _upsert_tournament(db: Session, payload: dict) -> Tournament:
@@ -151,22 +173,26 @@ def sync_live_tournaments(
     synced = []
     sources: set[str] = set()
     errors: list[str] = []
+    valid_track_ids = [tid for tid in track_ids if tid in US_TRACKS]
 
-    for track_id in track_ids:
-        if track_id not in US_TRACKS:
-            continue
-        try:
-            races, source = fetch_public_track_racecards(track_id, day, api_user, api_pass)
-            if not races:
-                errors.append(f"{track_id}: no races")
-                continue
-            payload = build_tournament_payload(track_id, races, day, source)
-            _upsert_tournament(db, payload)
-            synced.append(payload["slug"])
-            sources.add(source)
-        except Exception as exc:
-            logger.exception("Sync failed for %s", track_id)
-            errors.append(f"{track_id}: {exc}")
+    # Scrape tracks in parallel so page refresh stays within serverless timeouts.
+    payloads: list[dict] = []
+    with ThreadPoolExecutor(max_workers=min(3, len(valid_track_ids) or 1)) as pool:
+        futures = {
+            pool.submit(_fetch_track_payload, track_id, day, api_user, api_pass): track_id
+            for track_id in valid_track_ids
+        }
+        for future in as_completed(futures):
+            _track_id, payload, error = future.result()
+            if error:
+                errors.append(error)
+            elif payload:
+                payloads.append(payload)
+                sources.add(payload.get("dataSource") or "unknown")
+
+    for payload in payloads:
+        _upsert_tournament(db, payload)
+        synced.append(payload["slug"])
 
     db.commit()
 

@@ -35,7 +35,21 @@ uvicorn app.main:app --reload --port 8000
 
 API base: `http://localhost:8000/api`
 
-Seed demo data:
+## Deploy on Render
+
+Production URL: **https://five0-points-backend.onrender.com**
+
+| Variable | Example |
+|----------|---------|
+| `CORS_ORIGINS` | `https://50-points.vercel.app` |
+| `CORS_ORIGIN_REGEX` | `https://.*\.vercel\.app` |
+| `JWT_SECRET` | long random string |
+| `ADMIN_SECRET` | your admin secret |
+| `ENVIRONMENT` | `production` |
+
+On first boot the API creates tables and seeds demo tournaments if the database is empty.
+
+Seed demo data (manual):
 
 ```bash
 curl -X POST http://localhost:8000/api/admin/seed -H "x-admin-secret: change-me-admin-secret"

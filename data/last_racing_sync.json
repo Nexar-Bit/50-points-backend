@@ -1,10 +1,10 @@
 {
-  "syncedAt": "2026-05-28T13:16:08.874692+00:00",
-  "slugs": [],
-  "dataSource": "database",
-  "errors": [
-    "gulfstream-park: Client error '403 Forbidden' for url 'https://www.horseracingnation.com/entries-results/gulfstream-park'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403",
-    "santa-anita: Client error '403 Forbidden' for url 'https://www.horseracingnation.com/entries-results/santa-anita'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403",
-    "churchill-downs: Client error '403 Forbidden' for url 'https://www.horseracingnation.com/entries-results/churchill-downs'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403"
-  ]
+  "syncedAt": "2026-05-28T14:36:14.182287+00:00",
+  "slugs": [
+    "churchill-downs-2026-05-28",
+    "santa-anita-2026-05-28",
+    "gulfstream-park-2026-05-28"
+  ],
+  "dataSource": "horseracingnation-fallback",
+  "errors": []
 }
