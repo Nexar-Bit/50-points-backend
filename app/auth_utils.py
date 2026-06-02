@@ -54,6 +54,15 @@ def get_bearer_user(authorization: str | None = Header(default=None)) -> dict:
     return payload
 
 
+def optional_bearer_user(authorization: str | None = Header(default=None)) -> dict | None:
+    if not authorization or not authorization.startswith("Bearer "):
+        return None
+    payload = verify_token(authorization[7:])
+    if not payload or "userId" not in payload:
+        return None
+    return payload
+
+
 def require_admin(x_admin_secret: str | None = Header(default=None, alias="x-admin-secret")):
     expected = settings.admin_secret
     if not expected:

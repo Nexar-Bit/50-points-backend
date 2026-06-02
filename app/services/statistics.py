@@ -15,6 +15,12 @@ STRATEGY_LABELS = {
     "smart_pick": "Smart Point",
 }
 
+STRATEGY_SHORT = {
+    "full_point": "FP",
+    "dual_point": "DP",
+    "smart_pick": "SP",
+}
+
 
 def _strategy_breakdown(tickets: list[Ticket]) -> list[dict]:
     counts: Counter[str] = Counter()
@@ -24,12 +30,33 @@ def _strategy_breakdown(tickets: list[Ticket]) -> list[dict]:
     return [
         {
             "strategy": STRATEGY_LABELS.get(key, key),
+            "strategyShort": STRATEGY_SHORT.get(key, key),
             "strategyKey": key,
             "count": count,
             "percent": round(100 * count / total, 1),
         }
         for key, count in counts.most_common()
     ]
+
+
+def _track_profitability(tickets: list[Ticket]) -> dict:
+    """Average scored points per ticket grouped by racetrack."""
+    by_track: dict[str, list[int]] = defaultdict(list)
+    for t in tickets:
+        if not t.isScored or not t.race or not t.race.tournament:
+            continue
+        by_track[t.race.tournament.track].append(t.pointsEarned or 0)
+    if not by_track:
+        return {"mostProfitableTrack": None, "mostDifficultTrack": None}
+    averages = {track: sum(vals) / len(vals) for track, vals in by_track.items()}
+    return {
+        "mostProfitableTrack": max(averages, key=averages.get),
+        "mostDifficultTrack": min(averages, key=averages.get),
+        "trackAverages": [
+            {"track": track, "averagePoints": round(avg, 1)}
+            for track, avg in sorted(averages.items(), key=lambda x: x[1], reverse=True)
+        ],
+    }
 
 
 def _top_horses(tickets: list[Ticket], limit: int = 10) -> list[dict]:
@@ -51,6 +78,64 @@ def _top_horses(tickets: list[Ticket], limit: int = 10) -> list[dict]:
         }
         for hid, count in horse_counts.most_common(limit)
     ]
+
+
+def race_statistics(db: Session, race_id: int, user_id: int | None = None) -> dict | None:
+    race = (
+        db.query(Race)
+        .options(joinedload(Race.horses), joinedload(Race.tournament))
+        .filter(Race.id == race_id)
+        .first()
+    )
+    if not race:
+        return None
+
+    tickets = (
+        db.query(Ticket)
+        .options(joinedload(Ticket.race).joinedload(Race.horses))
+        .filter(Ticket.raceId == race_id)
+        .all()
+    )
+
+    scored = [t for t in tickets if t.isScored]
+    earned = [t.pointsEarned or 0 for t in scored]
+    avg_points = round(sum(earned) / len(earned), 1) if earned else 0
+
+    result = {
+        "level": "race",
+        "scope": "race",
+        "raceId": race.id,
+        "raceNumber": race.raceNumber,
+        "raceName": race.name or f"Carrera {race.raceNumber}",
+        "raceStatus": race.status,
+        "tournamentId": race.tournamentId,
+        "tournamentName": race.tournament.name if race.tournament else None,
+        "track": race.tournament.track if race.tournament else None,
+        "topHorses": _top_horses(tickets),
+        "strategyUsage": _strategy_breakdown(tickets),
+        "totalTickets": len(tickets),
+        "uniquePlayers": len({t.userId for t in tickets}),
+        "averagePointsEarned": avg_points,
+        "profitability": {
+            "averagePoints": avg_points,
+            "maxPoints": max(earned) if earned else 0,
+            "minPoints": min(earned) if earned else 0,
+        },
+    }
+
+    if user_id is not None:
+        user_tickets = [t for t in tickets if t.userId == user_id]
+        user_scored = [t for t in user_tickets if t.isScored]
+        user_earned = sum(t.pointsEarned or 0 for t in user_scored)
+        result["personal"] = {
+            "topHorses": _top_horses(user_tickets),
+            "strategyUsage": _strategy_breakdown(user_tickets),
+            "totalTickets": len(user_tickets),
+            "pointsEarned": user_earned,
+            "averagePointsEarned": round(user_earned / len(user_scored), 1) if user_scored else 0,
+        }
+
+    return result
 
 
 def tournament_statistics(db: Session, tournament_id: int) -> dict:
@@ -190,6 +275,23 @@ def track_statistics(db: Session, track_name: str) -> dict | None:
         }
 
     participation = len({t.userId for t in tickets})
+    race_participation: Counter[int] = Counter()
+    race_labels: dict[int, str] = {}
+    for t in tickets:
+        if t.raceId:
+            race_participation[t.raceId] += 1
+            if t.race:
+                race_labels[t.raceId] = f"Carrera {t.race.raceNumber}"
+
+    top_races = [
+        {
+            "raceId": rid,
+            "label": race_labels.get(rid, f"Race #{rid}"),
+            "plays": count,
+        }
+        for rid, count in race_participation.most_common(5)
+    ]
+
     return {
         "level": 2,
         "scope": "racetrack",
@@ -200,6 +302,8 @@ def track_statistics(db: Session, track_name: str) -> dict | None:
         "strategyUsage": _strategy_breakdown(tickets),
         "topPlayer": top_player,
         "highestRecord": top_player["totalPoints"] if top_player else 0,
+        "topRacesByParticipation": top_races,
+        "profitability": _track_profitability(tickets),
     }
 
 
@@ -225,12 +329,16 @@ def global_statistics(db: Session) -> dict:
         .all()
     )
 
+    profitability = _track_profitability(tickets)
+
     return {
         "level": 3,
         "scope": "global",
         "topHorses": _top_horses(tickets),
         "strategyUsage": _strategy_breakdown(tickets),
         "mostPopularTrack": most_popular_track,
+        "mostProfitableTrack": profitability.get("mostProfitableTrack"),
+        "mostDifficultTrack": profitability.get("mostDifficultTrack"),
         "trackParticipation": [
             {"track": track, "plays": count}
             for track, count in track_participation.most_common(10)
@@ -245,4 +353,5 @@ def global_statistics(db: Session) -> dict:
             for stats, user in top_stats
         ],
         "totalTickets": len(tickets),
+        "profitability": profitability,
     }
