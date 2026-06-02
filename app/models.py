@@ -166,3 +166,55 @@ class AchievementCard(Base):
     cardId: Mapped[str] = mapped_column(String)
     payload: Mapped[str] = mapped_column(String)
     earnedAt: Mapped[datetime] = mapped_column(PrismaDateTime, default=datetime.utcnow)
+
+
+class Group(Base):
+    __tablename__ = "Group"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String)
+    founderId: Mapped[int] = mapped_column(ForeignKey("User.id"))
+    privacyMode: Mapped[bool] = mapped_column(Boolean, default=False)
+    createdAt: Mapped[datetime] = mapped_column(PrismaDateTime, default=datetime.utcnow)
+
+    members: Mapped[list["GroupMember"]] = relationship(back_populates="group")
+    holograms: Mapped[list["GroupHologram"]] = relationship(back_populates="group")
+
+
+class GroupMember(Base):
+    __tablename__ = "GroupMember"
+    __table_args__ = (UniqueConstraint("groupId", "userId"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    groupId: Mapped[int] = mapped_column(ForeignKey("Group.id"))
+    userId: Mapped[int] = mapped_column(ForeignKey("User.id"))
+    role: Mapped[str] = mapped_column(String, default="member")  # founder | admin | member
+    status: Mapped[str] = mapped_column(String, default="active")  # active | pending
+    requestedAt: Mapped[datetime | None] = mapped_column(PrismaDateTime, nullable=True)
+    createdAt: Mapped[datetime] = mapped_column(PrismaDateTime, default=datetime.utcnow)
+
+    group: Mapped["Group"] = relationship(back_populates="members")
+    user: Mapped["User"] = relationship()
+
+
+class GroupHologram(Base):
+    __tablename__ = "GroupHologram"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    groupId: Mapped[int] = mapped_column(ForeignKey("Group.id"))
+    authorId: Mapped[int] = mapped_column(ForeignKey("User.id"))
+    message: Mapped[str] = mapped_column(String)
+    emoji: Mapped[str | None] = mapped_column(String, nullable=True)
+    colorVersion: Mapped[str] = mapped_column(String, default="purple")
+    sentAt: Mapped[datetime] = mapped_column(PrismaDateTime, default=datetime.utcnow)
+
+    group: Mapped["Group"] = relationship(back_populates="holograms")
+
+
+class GroupHologramCooldown(Base):
+    __tablename__ = "GroupHologramCooldown"
+    __table_args__ = (UniqueConstraint("groupId"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    groupId: Mapped[int] = mapped_column(ForeignKey("Group.id"), unique=True)
+    nextAvailableAt: Mapped[datetime] = mapped_column(PrismaDateTime)

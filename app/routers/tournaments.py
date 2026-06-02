@@ -240,13 +240,15 @@ def tournament_leaderboard(
 
     refresh_tournament_rank_changes(db, t.id)
 
-    by_user: dict[int, dict] = {}
-    for entry, user in rows:
-        uid = user.id
+    # Leaderboard is ticket-based: each entry is one ticket (user may appear multiple times).
+    leaderboard = []
+    ticket_entries = []
+    for rank, (entry, user) in enumerate(rows, start=1):
         strategy_key = dominant_strategy_key(entry)
-        recent_plays = get_recent_plays(db, uid, t.id, entry.ticketNumber)
+        recent_plays = get_recent_plays(db, user.id, t.id, entry.ticketNumber)
         row_payload = {
-            "userId": uid,
+            "rank": rank,
+            "userId": user.id,
             "username": user.username,
             "avatarColor": user.avatarColor,
             "isGuest": user.isGuest,
@@ -266,22 +268,7 @@ def tournament_leaderboard(
             "recentPlays": recent_plays,
             "updatedAt": entry.updatedAt.isoformat() if entry.updatedAt else None,
         }
-        existing = by_user.get(uid)
-        if not existing or entry.totalPoints > existing["totalPoints"]:
-            by_user[uid] = row_payload
-
-    sorted_users = sorted(
-        by_user.values(),
-        key=lambda x: (-x["totalPoints"], -x["winStreak"], -x["racesPlayed"]),
-    )
-
-    leaderboard = []
-    for rank, row in enumerate(sorted_users, start=1):
-        leaderboard.append({**row, "rank": rank})
-
-    ticket_entries = []
-    for rank, (entry, user) in enumerate(rows, start=1):
-        strategy_key = dominant_strategy_key(entry)
+        leaderboard.append(row_payload)
         ticket_entries.append(
             {
                 "rank": rank,

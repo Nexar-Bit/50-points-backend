@@ -54,6 +54,7 @@ def login(body: LoginBody, db: Session = Depends(get_db)):
             "email": user.email,
             "avatarColor": user.avatarColor,
             "isGuest": user.isGuest,
+            "gameMode": user.gameMode,
         },
     }
 

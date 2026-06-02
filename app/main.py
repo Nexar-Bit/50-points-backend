@@ -9,6 +9,10 @@ from app.config import settings
 from app.database import Base, SessionLocal, engine
 from app.models import (  # noqa: F401
     AchievementCard,
+    Group,
+    GroupHologram,
+    GroupHologramCooldown,
+    GroupMember,
     Horse,
     LeaderboardEntry,
     Race,
@@ -18,7 +22,7 @@ from app.models import (  # noqa: F401
     User,
     UserStats,
 )
-from app.routers import admin, auth, leaderboard, profile, races, tickets, tournaments
+from app.routers import admin, auth, groups, leaderboard, profile, races, records, statistics, tickets, tournaments
 from app.seed import ensure_seeded_if_empty
 from app.services.tournament_sync import run_sync_job, start_background_sync, stop_background_sync
 
@@ -140,6 +144,9 @@ app.include_router(leaderboard.router, prefix=api_prefix)
 app.include_router(profile.router, prefix=api_prefix)
 app.include_router(admin.router, prefix=api_prefix)
 app.include_router(races.router, prefix=api_prefix)
+app.include_router(statistics.router, prefix=api_prefix)
+app.include_router(records.router, prefix=api_prefix)
+app.include_router(groups.router, prefix=api_prefix)
 
 
 @app.get("/health")

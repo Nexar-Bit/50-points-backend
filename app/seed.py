@@ -2,6 +2,7 @@ import json
 import random
 from datetime import datetime
 
+from app.constants import RACES_PER_TOURNAMENT
 from app.models import (
     Horse,
     LeaderboardEntry,
@@ -12,6 +13,7 @@ from app.models import (
     User,
     UserStats,
 )
+from app.scoring import score_ticket
 
 SILK_COLORS = [
     {"primary": "#e11d48", "secondary": "#fbbf24"},
@@ -49,7 +51,7 @@ TOURNAMENTS = [
         "track": "Gulfstream Park",
         "location": "Hallandale Beach, FL",
         "status": "live",
-        "totalRaces": 10,
+        "totalRaces": RACES_PER_TOURNAMENT,
         "currentRace": 4,
         "date": datetime(2026, 5, 26, 14, 0, 0),
         "description": "Premier South Florida racing event featuring top thoroughbreds",
@@ -60,7 +62,7 @@ TOURNAMENTS = [
         "track": "Churchill Downs",
         "location": "Louisville, KY",
         "status": "live",
-        "totalRaces": 12,
+        "totalRaces": RACES_PER_TOURNAMENT,
         "currentRace": 7,
         "date": datetime(2026, 5, 26, 13, 0, 0),
         "description": "Historic Kentucky racing with world-class competition",
@@ -71,7 +73,7 @@ TOURNAMENTS = [
         "track": "Santa Anita Park",
         "location": "Arcadia, CA",
         "status": "upcoming",
-        "totalRaces": 8,
+        "totalRaces": RACES_PER_TOURNAMENT,
         "currentRace": 0,
         "date": datetime(2026, 5, 27, 17, 0, 0),
         "description": "West Coast premier thoroughbred racing series",
@@ -177,18 +179,15 @@ def run_seed(db):
                     db.add(RaceResult(raceId=race.id, horseId=finishing[pos - 1].id, position=pos))
                 db.flush()
 
-                winner_id = finishing[0].id
+                result_dicts = [
+                    {"position": pos, "horseId": finishing[pos - 1].id}
+                    for pos in range(1, min(len(finishing), 5) + 1)
+                ]
                 for user in _shuffle(users)[: random.randint(10, 24)]:
                     strategy = random.choice(["full_point", "dual_point", "smart_pick"])
                     picks_count = {"full_point": 1, "dual_point": 2, "smart_pick": 3}[strategy]
                     picks = [h.id for h in _shuffle(horses)[:picks_count]]
-                    alloc = {"full_point": [50], "dual_point": [25, 25], "smart_pick": [30, 15, 5]}[strategy]
-                    points = 0
-                    for pi, pid in enumerate(picks):
-                        if pid == winner_id:
-                            winner = next(h for h in horses if h.id == winner_id)
-                            points = round(alloc[pi] * winner.odds)
-                            break
+                    points = score_ticket(strategy, picks, result_dicts, horses)
 
                     exists = (
                         db.query(Ticket)

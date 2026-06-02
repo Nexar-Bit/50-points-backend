@@ -1,0 +1,61 @@
+"""Platform records catalog (Hall of Fame / records system)."""
+
+RECORDS_CATALOG = [
+    {
+        "id": "full-point-streak-3",
+        "group": 6,
+        "category": "fullPoint",
+        "name": "3 Full Points Consecutivos",
+        "nameEn": "3 Consecutive Full Points",
+        "status": "hot",
+    },
+    {
+        "id": "dual-point-streak-6",
+        "group": 6,
+        "category": "dualPoint",
+        "name": "6 Dual Points Consecutivos",
+        "nameEn": "6 Consecutive Dual Points",
+        "status": "legendary",
+    },
+    {
+        "id": "points-1k",
+        "group": 6,
+        "category": "milestones",
+        "name": "Primer jugador en 1.000 puntos",
+        "nameEn": "First player to 1,000 points",
+        "status": "dormant",
+    },
+    {
+        "id": "points-5k",
+        "group": 5,
+        "category": "milestones",
+        "name": "Primer jugador en 5.000 puntos",
+        "nameEn": "First player to 5,000 points",
+        "status": "impossible",
+    },
+    {
+        "id": "king-gulfstream",
+        "group": 4,
+        "category": "racetrack",
+        "name": "Rey de Gulfstream Park",
+        "nameEn": "King of Gulfstream Park",
+        "status": "hot",
+        "track": "Gulfstream Park",
+    },
+    {
+        "id": "perfect-tournament",
+        "group": 1,
+        "category": "mythic",
+        "name": "Torneo Perfecto",
+        "nameEn": "Perfect Tournament",
+        "status": "impossible",
+    },
+    {
+        "id": "comeback-32",
+        "group": 3,
+        "category": "ranking",
+        "name": "Mayor remontada (+32 posiciones)",
+        "nameEn": "Greatest comeback (+32 positions)",
+        "status": "viral",
+    },
+]

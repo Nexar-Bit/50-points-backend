@@ -5,8 +5,9 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session, joinedload
 
 from app.auth_utils import STRATEGIES, get_bearer_user
+from app.constants import LAUNCH_GAME_MODES, MAX_FREE_TICKETS
 from app.database import get_db
-from app.models import Race, Ticket
+from app.models import Race, Ticket, User
 from app.scoring import get_required_picks
 
 router = APIRouter(prefix="/tickets", tags=["tickets"])
@@ -21,9 +22,18 @@ class TicketBody(BaseModel):
 
 @router.post("")
 def submit_ticket(body: TicketBody, payload: dict = Depends(get_bearer_user), db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == payload["userId"]).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    if user.gameMode not in LAUNCH_GAME_MODES:
+        raise HTTPException(
+            status_code=403,
+            detail="Paid tournament modes are not available yet. Use Guest or Registered mode.",
+        )
+
     ticket_number = body.ticketNumber if body.ticketNumber is not None else 1
-    if ticket_number not in (1, 2, 3):
-        raise HTTPException(status_code=400, detail="ticketNumber must be 1, 2, or 3")
+    if ticket_number not in range(1, MAX_FREE_TICKETS + 1):
+        raise HTTPException(status_code=400, detail=f"ticketNumber must be 1–{MAX_FREE_TICKETS}")
     if body.strategy not in STRATEGIES:
         raise HTTPException(status_code=400, detail="Invalid strategy")
 

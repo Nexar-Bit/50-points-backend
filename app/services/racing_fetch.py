@@ -10,6 +10,8 @@ from typing import Any
 import httpx
 from bs4 import BeautifulSoup
 
+from app.constants import RACES_PER_TOURNAMENT
+
 logger = logging.getLogger(__name__)
 
 RACING_API_BASE = "https://api.theracingapi.com/v1"
@@ -295,6 +297,10 @@ def build_tournament_payload(
     slug = f"{track_id}-{race_date}"
     now = datetime.now(timezone.utc)
 
+    races = sorted(races, key=lambda r: r.get("raceNumber", 0))[:RACES_PER_TOURNAMENT]
+    for i, r in enumerate(races, start=1):
+        r["raceNumber"] = i
+
     current_race = 1
     for r in races:
         off = r.get("scheduledTime")
@@ -325,7 +331,7 @@ def build_tournament_payload(
         "track": track["name"],
         "location": track["location"],
         "status": status,
-        "totalRaces": len(races),
+        "totalRaces": RACES_PER_TOURNAMENT,
         "currentRace": current_race,
         "date": race_date,
         "description": f"Live racecard synced from {source}",
