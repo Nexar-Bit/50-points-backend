@@ -33,6 +33,10 @@ class RegisterBody(BaseModel):
     password: str
 
 
+class GuestResumeBody(BaseModel):
+    guestToken: str
+
+
 @router.post("/login")
 def login(body: LoginBody, db: Session = Depends(get_db)):
     identifier = (body.login or body.username or body.email or "").strip()
@@ -148,7 +152,7 @@ def guest(db: Session = Depends(get_db)):
         db.add(UserStats(userId=user.id))
         db.commit()
         db.refresh(user)
-        token = sign_token(user.id, user.username)
+        token = sign_token(user.id, user.username, is_guest=True)
         return {
             "token": token,
             "guestToken": guest_token,
@@ -161,3 +165,44 @@ def guest(db: Session = Depends(get_db)):
             },
         }
     raise HTTPException(status_code=500, detail="Could not create guest user")
+
+
+@router.post("/guest/resume")
+def resume_guest(body: GuestResumeBody, db: Session = Depends(get_db)):
+    """Restore guest session from saved guestToken (profile does not expire in DB)."""
+    token_value = (body.guestToken or "").strip()
+    if not token_value:
+        raise HTTPException(status_code=400, detail="guestToken is required")
+
+    user = (
+        db.query(User)
+        .filter(User.guestToken == token_value, User.isGuest == True)
+        .first()
+    )
+    if not user:
+        raise HTTPException(status_code=404, detail="Guest profile not found")
+
+    jwt_token = sign_token(user.id, user.username, is_guest=True)
+    stats = db.query(UserStats).filter(UserStats.userId == user.id).first()
+    return {
+        "token": jwt_token,
+        "guestToken": user.guestToken,
+        "user": {
+            "id": user.id,
+            "username": user.username,
+            "avatarColor": user.avatarColor,
+            "isGuest": user.isGuest,
+            "gameMode": user.gameMode,
+            "stats": {
+                "totalPoints": stats.totalPoints if stats else 0,
+                "tournamentsPlayed": stats.tournamentsPlayed if stats else 0,
+                "totalRaces": stats.totalRaces if stats else 0,
+                "winRate": stats.winRate if stats else 0,
+                "bestStreak": stats.bestStreak if stats else 0,
+                "titles": stats.titles if stats else 0,
+                "records": stats.records if stats else 0,
+            }
+            if stats
+            else None,
+        },
+    }

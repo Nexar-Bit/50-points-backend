@@ -11,12 +11,21 @@ from app.config import settings
 STRATEGIES = ("full_point", "dual_point", "smart_pick")
 
 
-def sign_token(user_id: int, username: str) -> str:
+def sign_token(user_id: int, username: str, *, is_guest: bool = False) -> str:
+    """
+    Registered users: 30-day JWT session.
+    Guest users: long-lived token — the guest profile in DB does not expire;
+    access is lost only if the client loses token/guestToken without registering.
+    """
     payload = {
         "userId": user_id,
         "username": username,
-        "exp": datetime.now(timezone.utc) + timedelta(days=30),
+        "isGuest": is_guest,
     }
+    if is_guest:
+        payload["exp"] = datetime.now(timezone.utc) + timedelta(days=3650)
+    else:
+        payload["exp"] = datetime.now(timezone.utc) + timedelta(days=30)
     token = jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
     return token if isinstance(token, str) else token.decode()
 

@@ -39,15 +39,32 @@ def _normalize_picks(picks) -> list[int]:
     return [int(x) for x in picks]
 
 
+def _horse_dividend(horses: list | None, horse_id: int) -> float:
+    """Official payout dividend / odds for the selected horse (multiplier)."""
+    if not horses:
+        return 1.0
+    for h in horses:
+        hid = h.get("id") if isinstance(h, dict) else h.id
+        if int(hid) == int(horse_id):
+            raw = h.get("odds") if isinstance(h, dict) else h.odds
+            try:
+                val = float(raw)
+            except (TypeError, ValueError):
+                return 1.0
+            return val if val > 0 else 1.0
+    return 1.0
+
+
 def score_ticket(strategy: str, picks, results: list, horses: list | None = None) -> int:
     """
-    Score a ticket per requirements v1.1 (flat points, position-matched picks).
+    Score a ticket: base allocation × horse dividend when the pick hits the required position.
 
-    - Full Point: 50 if the single pick finishes 1st.
-    - Dual Point: 25 if pick[0] finishes 1st; 25 if pick[1] finishes 2nd (independent sum).
-    - Smart Pick: 30/15/5 if picks[0..2] finish 1st/2nd/3rd respectively (independent sum).
+    Example (Full Point): 50 pts on horse #3 in race 6, horse wins at dividend 4.20 → 50 × 4.20 = 210 pts.
+
+    - Full Point: pick must finish 1st → 50 × dividend.
+    - Dual Point: pick[0] 1st → 25 × its dividend; pick[1] 2nd → 25 × its dividend (independent).
+    - Smart Pick: 30/15/5 × each pick's dividend for 1st/2nd/3rd slots (independent).
     """
-    del horses  # flat points; odds not applied in MVP scoring
     picks_arr = _normalize_picks(picks)
     if not picks_arr or strategy not in ALLOCATIONS:
         return 0
@@ -68,6 +85,8 @@ def score_ticket(strategy: str, picks, results: list, horses: list | None = None
             continue
         actual_horse = by_position.get(required_pos)
         if actual_horse is not None and int(pick_id) == int(actual_horse):
-            total += allocation[i]
+            base = allocation[i]
+            dividend = _horse_dividend(horses, pick_id)
+            total += round(base * dividend)
 
     return int(total)
