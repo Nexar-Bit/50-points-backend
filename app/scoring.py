@@ -6,12 +6,9 @@ ALLOCATIONS = {
     "smart_pick": [30, 15, 5],
 }
 
-# Pick index → finishing position required for that allocation slot
-_POSITION_BY_SLOT = {
-    "full_point": [1],
-    "dual_point": [1, 2],
-    "smart_pick": [1, 2, 3],
-}
+# Every allocation slot pays only if that horse is the race WINNER (ganador).
+# Dual Point and Smart Point splits are independent: each pick is scored on its own.
+_WINNER_POSITION = 1
 
 
 def get_required_picks(strategy: str) -> int:
@@ -57,13 +54,15 @@ def _horse_dividend(horses: list | None, horse_id: int) -> float:
 
 def score_ticket(strategy: str, picks, results: list, horses: list | None = None) -> int:
     """
-    Score a ticket: base allocation × horse dividend when the pick hits the required position.
+    Score a ticket: allocation × official dividend for each pick that wins the race (ganador).
 
-    Example (Full Point): 50 pts on horse #3 in race 6, horse wins at dividend 4.20 → 50 × 4.20 = 210 pts.
+    Tournament: 7 races × 50 points played per race (350 points budget per ticket path).
+    Play options (independent, winner-only):
+      - Full Point: 50 on one horse.
+      - Dual Point: 25 + 25 on two horses (each slot pays if that horse wins).
+      - Smart Point: 30 + 15 + 5 on three horses (each slot pays if that horse wins).
 
-    - Full Point: pick must finish 1st → 50 × dividend.
-    - Dual Point: pick[0] 1st → 25 × its dividend; pick[1] 2nd → 25 × its dividend (independent).
-    - Smart Pick: 30/15/5 × each pick's dividend for 1st/2nd/3rd slots (independent).
+    Example: 50 pts on horse #3, dividend 4.20 → 50 × 4.20 = 210 pts earned for that race.
     """
     picks_arr = _normalize_picks(picks)
     if not picks_arr or strategy not in ALLOCATIONS:
@@ -74,17 +73,13 @@ def score_ticket(strategy: str, picks, results: list, horses: list | None = None
         return 0
 
     allocation = ALLOCATIONS[strategy]
-    required_positions = _POSITION_BY_SLOT[strategy]
+    winner_horse_id = by_position.get(_WINNER_POSITION)
     total = 0
 
     for i, pick_id in enumerate(picks_arr):
         if i >= len(allocation):
             break
-        required_pos = required_positions[i] if i < len(required_positions) else None
-        if required_pos is None:
-            continue
-        actual_horse = by_position.get(required_pos)
-        if actual_horse is not None and int(pick_id) == int(actual_horse):
+        if winner_horse_id is not None and int(pick_id) == int(winner_horse_id):
             base = allocation[i]
             dividend = _horse_dividend(horses, pick_id)
             total += round(base * dividend)

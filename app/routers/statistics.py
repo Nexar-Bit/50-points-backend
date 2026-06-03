@@ -31,19 +31,29 @@ def get_race_stats(
 
 
 @router.get("/tournament/{tournament_id}")
-def get_tournament_stats(tournament_id: int, db: Session = Depends(get_db)):
-    data = tournament_statistics(db, tournament_id)
+def get_tournament_stats(
+    tournament_id: int,
+    db: Session = Depends(get_db),
+    payload: Optional[dict] = Depends(optional_bearer_user),
+):
+    user_id = payload["userId"] if payload else None
+    data = tournament_statistics(db, tournament_id, user_id=user_id)
     if not data:
         raise HTTPException(status_code=404, detail="Tournament not found")
     return data
 
 
 @router.get("/tournament/slug/{slug}")
-def get_tournament_stats_by_slug(slug: str, db: Session = Depends(get_db)):
+def get_tournament_stats_by_slug(
+    slug: str,
+    db: Session = Depends(get_db),
+    payload: Optional[dict] = Depends(optional_bearer_user),
+):
     t = db.query(Tournament).filter(Tournament.slug == slug).first()
     if not t:
         raise HTTPException(status_code=404, detail="Tournament not found")
-    return tournament_statistics(db, t.id)
+    user_id = payload["userId"] if payload else None
+    return tournament_statistics(db, t.id, user_id=user_id)
 
 
 @router.get("/personal")
