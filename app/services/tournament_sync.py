@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.config import BACKEND_ROOT, settings
 from app.database import SessionLocal
-from app.models import Horse, Race, Tournament
+from app.models import Horse, Race, Ticket, Tournament
 from app.services.racing_fetch import US_TRACKS, build_tournament_payload, fetch_public_track_racecards
 
 logger = logging.getLogger(__name__)
@@ -141,6 +141,47 @@ def _fetch_track_payload(
         return track_id, None, f"{track_id}: {exc}"
 
 
+def _sync_horses(db: Session, race: Race, horses_data: list[dict]) -> None:
+    """Update horses in place so ticket pick horseIds stay valid after sync."""
+    existing = {
+        h.postPosition: h for h in db.query(Horse).filter(Horse.raceId == race.id).all()
+    }
+    has_tickets = (
+        db.query(Ticket.id).filter(Ticket.raceId == race.id).limit(1).first() is not None
+    )
+    seen: set[int] = set()
+
+    for horse_data in horses_data:
+        pp = int(horse_data["postPosition"])
+        seen.add(pp)
+        horse = existing.get(pp)
+        if horse:
+            horse.name = horse_data["name"]
+            horse.jockey = horse_data.get("jockey")
+            horse.trainer = horse_data.get("trainer")
+            horse.odds = float(horse_data.get("odds", horse.odds or 5.0))
+            horse.silkPrimary = horse_data.get("silkPrimary")
+            horse.silkSecondary = horse_data.get("silkSecondary")
+        else:
+            db.add(
+                Horse(
+                    raceId=race.id,
+                    postPosition=pp,
+                    name=horse_data["name"],
+                    jockey=horse_data.get("jockey"),
+                    trainer=horse_data.get("trainer"),
+                    odds=float(horse_data.get("odds", 5.0)),
+                    silkPrimary=horse_data.get("silkPrimary"),
+                    silkSecondary=horse_data.get("silkSecondary"),
+                )
+            )
+
+    if not has_tickets:
+        for pp, horse in existing.items():
+            if pp not in seen:
+                db.delete(horse)
+
+
 def _upsert_tournament(db: Session, payload: dict) -> Tournament:
     slug = payload["slug"]
     tournament = db.query(Tournament).filter(Tournament.slug == slug).first()
@@ -176,41 +217,53 @@ def _upsert_tournament(db: Session, payload: dict) -> Tournament:
         db.add(tournament)
         db.flush()
 
-    # Replace races/horses for fresh public data
-    existing_races = db.query(Race).filter(Race.tournamentId == tournament.id).all()
-    for old_race in existing_races:
-        db.query(Horse).filter(Horse.raceId == old_race.id).delete(synchronize_session=False)
-        db.delete(old_race)
-    db.flush()
+    # Upsert by raceNumber — keep race/horse IDs stable so submitted tickets still resolve.
+    existing_by_number = {
+        r.raceNumber: r
+        for r in db.query(Race).filter(Race.tournamentId == tournament.id).all()
+    }
+    incoming_numbers: set[int] = set()
 
     for race_data in payload["races"]:
-        race = Race(
-            tournamentId=tournament.id,
-            raceNumber=race_data["raceNumber"],
-            name=race_data["name"],
-            status=race_data.get("status", "upcoming"),
-            scheduledTime=str(race_data.get("scheduledTime", "TBD")),
-            distance=race_data.get("distance"),
-            surface=race_data.get("surface"),
-            raceClass=race_data.get("raceClass"),
-            purse=race_data.get("purse"),
-        )
-        db.add(race)
-        db.flush()
-
-        for horse_data in race_data.get("horses", []):
-            db.add(
-                Horse(
-                    raceId=race.id,
-                    postPosition=horse_data["postPosition"],
-                    name=horse_data["name"],
-                    jockey=horse_data.get("jockey"),
-                    trainer=horse_data.get("trainer"),
-                    odds=float(horse_data.get("odds", 5.0)),
-                    silkPrimary=horse_data.get("silkPrimary"),
-                    silkSecondary=horse_data.get("silkSecondary"),
-                )
+        race_number = int(race_data["raceNumber"])
+        incoming_numbers.add(race_number)
+        race = existing_by_number.get(race_number)
+        if race:
+            race.name = race_data["name"]
+            race.status = race_data.get("status", "upcoming")
+            race.scheduledTime = str(race_data.get("scheduledTime", "TBD"))
+            race.distance = race_data.get("distance")
+            race.surface = race_data.get("surface")
+            race.raceClass = race_data.get("raceClass")
+            race.purse = race_data.get("purse")
+        else:
+            race = Race(
+                tournamentId=tournament.id,
+                raceNumber=race_number,
+                name=race_data["name"],
+                status=race_data.get("status", "upcoming"),
+                scheduledTime=str(race_data.get("scheduledTime", "TBD")),
+                distance=race_data.get("distance"),
+                surface=race_data.get("surface"),
+                raceClass=race_data.get("raceClass"),
+                purse=race_data.get("purse"),
             )
+            db.add(race)
+            db.flush()
+            existing_by_number[race_number] = race
+
+        _sync_horses(db, race, race_data.get("horses", []))
+
+    for race_number, old_race in list(existing_by_number.items()):
+        if race_number in incoming_numbers:
+            continue
+        has_tickets = (
+            db.query(Ticket.id).filter(Ticket.raceId == old_race.id).limit(1).first() is not None
+        )
+        if has_tickets:
+            continue
+        db.query(Horse).filter(Horse.raceId == old_race.id).delete(synchronize_session=False)
+        db.delete(old_race)
 
     return tournament
 

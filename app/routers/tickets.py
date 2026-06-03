@@ -18,6 +18,8 @@ class TicketBody(BaseModel):
     strategy: str
     picks: list[int]
     ticketNumber: int | None = 1
+    tournamentId: int | None = None
+    raceNumber: int | None = None
 
 
 @router.post("")
@@ -42,8 +44,21 @@ def submit_ticket(body: TicketBody, payload: dict = Depends(get_bearer_user), db
         raise HTTPException(status_code=400, detail=f"{body.strategy} requires exactly {required} pick(s)")
 
     race = db.query(Race).options(joinedload(Race.horses)).filter(Race.id == body.raceId).first()
+    if not race and body.tournamentId is not None and body.raceNumber is not None:
+        race = (
+            db.query(Race)
+            .options(joinedload(Race.horses))
+            .filter(
+                Race.tournamentId == body.tournamentId,
+                Race.raceNumber == body.raceNumber,
+            )
+            .first()
+        )
     if not race:
-        raise HTTPException(status_code=404, detail="Race not found")
+        raise HTTPException(
+            status_code=404,
+            detail="Race not found (stale race id — refresh the tournament page)",
+        )
     if race.status not in ("upcoming", "open"):
         raise HTTPException(status_code=400, detail="Race is no longer accepting picks")
 
