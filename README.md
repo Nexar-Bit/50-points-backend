@@ -12,7 +12,18 @@ pip install -r requirements.txt
 copy .env.example .env
 ```
 
-SQLite database: `BACKEND/data/dev.db` (created on first seed).
+**Database**
+
+- **Local (default):** SQLite at `BACKEND/data/dev.db` — set `DATABASE_URL=sqlite:///./data/dev.db`
+- **Render PostgreSQL:** set `DATABASE_URL` to the connection string from the Render Postgres dashboard  
+  - From your machine: use the **External** URL (`…virginia-postgres.render.com`)  
+  - From the Render API service: use the **Internal** URL (`dpg-…-a` hostname)
+
+```bash
+pip install -r requirements.txt   # includes psycopg for PostgreSQL
+```
+
+Tables are created automatically on startup (`create_all`). Demo data is seeded when the DB is empty.
 
 ## Live tournaments (public data)
 
@@ -41,6 +52,7 @@ Production URL: **https://five0-points-backend.onrender.com**
 
 | Variable | Example |
 |----------|---------|
+| `DATABASE_URL` | Internal Postgres URL from Render (linked DB) |
 | `CORS_ORIGINS` | `https://50-points.vercel.app` |
 | `CORS_ORIGIN_REGEX` | `https://.*\.vercel\.app` |
 | `JWT_SECRET` | long random string |

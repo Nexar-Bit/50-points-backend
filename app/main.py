@@ -28,8 +28,11 @@ from app.services.tournament_sync import run_sync_job, start_background_sync, st
 
 
 def _ensure_leaderboard_columns():
-    """SQLite dev DB: add rank snapshot columns if missing."""
+    """SQLite dev DB only: add rank snapshot columns if missing."""
     from sqlalchemy import inspect, text
+
+    if not str(engine.url).startswith("sqlite"):
+        return
 
     try:
         insp = inspect(engine)
