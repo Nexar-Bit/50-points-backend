@@ -1,10 +1,10 @@
 {
-  "syncedAt": "2026-06-04T20:15:42.113919+00:00",
+  "syncedAt": "2026-06-05T01:33:25.107273+00:00",
   "slugs": [
-    "santa-anita-2026-06-04",
     "gulfstream-park-2026-06-04",
+    "santa-anita-2026-06-04",
     "churchill-downs-2026-06-04"
   ],
-  "dataSource": "horseracingnation-fallback",
+  "dataSource": "horseracingnation",
   "errors": []
 }
