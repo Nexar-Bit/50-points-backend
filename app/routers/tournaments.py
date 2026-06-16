@@ -46,26 +46,87 @@ def _iso_datetime(value) -> str | None:
     return str(value)
 
 
-@router.get("")
-def list_tournaments(
-    refresh: bool = Query(default=False),
-    for_home: bool = Query(default=False, description="Dedupe by track and return top live/upcoming cards"),
-    db: Session = Depends(get_db),
-):
-    sync_result = None
-    # Background loop scrapes every ~8s; only scrape on request when refresh=1 or fallback mode.
-    needs_sync = refresh or (
-        not settings.racing_background_sync and should_auto_sync(db)
+def _race_summaries(races: list[Race], horse_counts: dict[int, int], result_race_ids: set[int]) -> list[dict]:
+    return [
+        {
+            "id": r.id,
+            "raceNumber": r.raceNumber,
+            "name": r.name,
+            "status": r.status,
+            "scheduledTime": r.scheduledTime,
+            "distance": r.distance,
+            "surface": r.surface,
+            "raceClass": r.raceClass,
+            "purse": r.purse,
+            "horseCount": horse_counts.get(r.id, 0),
+            "hasResults": r.id in result_race_ids,
+        }
+        for r in sorted(races, key=lambda x: x.raceNumber)
+    ]
+
+
+def _list_tournaments_for_home(db: Session) -> list[dict]:
+    """Lightweight list for home/widgets — no horse/result payloads."""
+    tournaments = (
+        db.query(Tournament)
+        .options(selectinload(Tournament.races))
+        .filter(Tournament.status.in_(["live", "upcoming"]))
+        .order_by(Tournament.date.desc())
+        .all()
     )
-    if needs_sync:
-        try:
-            sync_result = sync_live_tournaments(db, force=refresh)
-        except Exception as exc:
-            logger.exception("Public racing sync failed: %s", exc)
-            db.rollback()
+    if not tournaments:
+        return []
 
-    ensure_seeded_if_empty(db)
+    tournament_ids = [t.id for t in tournaments]
+    race_ids = [r.id for t in tournaments for r in t.races]
 
+    ticket_counts = dict(
+        db.query(Ticket.tournamentId, func.count(Ticket.id))
+        .filter(Ticket.tournamentId.in_(tournament_ids))
+        .group_by(Ticket.tournamentId)
+        .all()
+    )
+
+    horse_counts: dict[int, int] = {}
+    result_race_ids: set[int] = set()
+    if race_ids:
+        horse_counts = dict(
+            db.query(Horse.raceId, func.count(Horse.id))
+            .filter(Horse.raceId.in_(race_ids))
+            .group_by(Horse.raceId)
+            .all()
+        )
+        result_race_ids = {
+            row[0]
+            for row in db.query(RaceResult.raceId)
+            .filter(RaceResult.raceId.in_(race_ids))
+            .distinct()
+            .all()
+        }
+
+    out = []
+    for t in tournaments:
+        out.append(
+            {
+                "id": t.id,
+                "slug": t.slug,
+                "name": t.name,
+                "track": t.track,
+                "location": t.location,
+                "status": t.status,
+                "totalRaces": t.totalRaces,
+                "currentRace": t.currentRace,
+                "date": _iso_datetime(t.date),
+                "description": t.description,
+                "imageUrl": t.imageUrl,
+                "players": ticket_counts.get(t.id, 0),
+                "races": _race_summaries(t.races, horse_counts, result_race_ids),
+            }
+        )
+    return out
+
+
+def _list_tournaments_full(db: Session) -> list[dict]:
     tournaments = (
         db.query(Tournament)
         .options(
@@ -111,6 +172,30 @@ def list_tournaments(
                 ],
             }
         )
+    return out
+
+
+@router.get("")
+def list_tournaments(
+    refresh: bool = Query(default=False),
+    for_home: bool = Query(default=False, description="Dedupe by track and return top live/upcoming cards"),
+    db: Session = Depends(get_db),
+):
+    sync_result = None
+    # Background loop scrapes every ~8s; home polls must stay fast (no scrape unless refresh=1).
+    needs_sync = refresh or (
+        not for_home and not settings.racing_background_sync and should_auto_sync(db)
+    )
+    if needs_sync:
+        try:
+            sync_result = sync_live_tournaments(db, force=refresh)
+        except Exception as exc:
+            logger.exception("Public racing sync failed: %s", exc)
+            db.rollback()
+
+    ensure_seeded_if_empty(db)
+
+    out = _list_tournaments_for_home(db) if for_home else _list_tournaments_full(db)
 
     if for_home:
         items = prepare_home_tournaments(out)
