@@ -106,6 +106,26 @@ def submit_ticket(body: TicketBody, payload: dict = Depends(get_bearer_user), db
     }
 
 
+@router.delete("")
+def clear_ticket_picks(
+    tournamentId: int = Query(...),
+    ticketNumber: int = Query(..., ge=1, le=MAX_FREE_TICKETS),
+    raceId: int | None = Query(default=None),
+    payload: dict = Depends(get_bearer_user),
+    db: Session = Depends(get_db),
+):
+    q = db.query(Ticket).filter(
+        Ticket.userId == payload["userId"],
+        Ticket.tournamentId == tournamentId,
+        Ticket.ticketNumber == ticketNumber,
+    )
+    if raceId is not None:
+        q = q.filter(Ticket.raceId == raceId)
+    deleted = q.delete(synchronize_session=False)
+    db.commit()
+    return {"cleared": True, "deleted": deleted}
+
+
 @router.get("")
 def list_tickets(
     tournamentId: int | None = Query(default=None),
