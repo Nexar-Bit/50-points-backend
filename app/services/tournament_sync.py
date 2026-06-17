@@ -6,10 +6,13 @@ import asyncio
 import json
 import logging
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timezone
 from pathlib import Path
 
+from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.config import BACKEND_ROOT, settings
@@ -23,6 +26,8 @@ logger = logging.getLogger(__name__)
 SYNC_META_PATH = BACKEND_ROOT / "data" / "last_racing_sync.json"
 SYNC_TRACKS = ("gulfstream-park", "santa-anita", "churchill-downs")
 SYNC_TTL_SECONDS = 5  # fallback when background sync is off
+SYNC_ADVISORY_LOCK_KEY = 50500150
+_DEADLOCK_MAX_ATTEMPTS = 4
 
 _last_source = "database"
 _sync_lock = threading.Lock()
@@ -43,15 +48,80 @@ def get_sync_status() -> dict:
     }
 
 
+def _is_deadlock_error(exc: BaseException) -> bool:
+    msg = str(exc).lower()
+    if "deadlock" in msg:
+        return True
+    orig = getattr(exc, "orig", None)
+    return bool(orig and "deadlock" in str(orig).lower())
+
+
+def _retry_on_deadlock(action, *, db: Session | None = None, label: str = "db-write"):
+    last_exc: Exception | None = None
+    for attempt in range(_DEADLOCK_MAX_ATTEMPTS):
+        try:
+            return action()
+        except OperationalError as exc:
+            last_exc = exc
+            if not _is_deadlock_error(exc) or attempt >= _DEADLOCK_MAX_ATTEMPTS - 1:
+                raise
+            if db is not None:
+                db.rollback()
+            wait_s = 0.15 * (attempt + 1)
+            logger.warning("%s deadlock (attempt %s/%s), retrying in %.2fs", label, attempt + 1, _DEADLOCK_MAX_ATTEMPTS, wait_s)
+            time.sleep(wait_s)
+    if last_exc:
+        raise last_exc
+    return None
+
+
+def retry_db_write_on_deadlock(action, *, db: Session | None = None, label: str = "db-write"):
+    """Public wrapper for deadlock-safe commits (API routes + sync)."""
+    return _retry_on_deadlock(action, db=db, label=label)
+
+
+def _try_sync_advisory_lock(db: Session) -> bool:
+    try:
+        if db.get_bind().dialect.name != "postgresql":
+            return True
+        return bool(
+            db.execute(
+                text("SELECT pg_try_advisory_lock(:lock_key)"),
+                {"lock_key": SYNC_ADVISORY_LOCK_KEY},
+            ).scalar()
+        )
+    except Exception:
+        logger.exception("Failed to acquire sync advisory lock")
+        return True
+
+
+def _release_sync_advisory_lock(db: Session) -> None:
+    try:
+        if db.get_bind().dialect.name != "postgresql":
+            return
+        db.execute(
+            text("SELECT pg_advisory_unlock(:lock_key)"),
+            {"lock_key": SYNC_ADVISORY_LOCK_KEY},
+        )
+    except Exception:
+        logger.exception("Failed to release sync advisory lock")
+
+
 def run_sync_job() -> dict:
     """One scrape cycle (thread-safe, skips if previous cycle still running)."""
     if not _sync_lock.acquire(blocking=False):
         return {"synced": False, "reason": "sync_in_progress", "dataSource": get_last_data_source()}
 
     db = SessionLocal()
+    locked = False
     try:
+        locked = _try_sync_advisory_lock(db)
+        if not locked:
+            return {"synced": False, "reason": "sync_locked_elsewhere", "dataSource": get_last_data_source()}
         return sync_live_tournaments(db, force=True)
     finally:
+        if locked:
+            _release_sync_advisory_lock(db)
         db.close()
         _sync_lock.release()
 
@@ -363,11 +433,22 @@ def sync_live_tournaments(
                 payloads.append(payload)
                 sources.add(payload.get("dataSource") or "unknown")
 
-    for payload in payloads:
-        _upsert_tournament(db, payload)
-        synced.append(payload["slug"])
+    payloads.sort(key=lambda p: p.get("slug", ""))
 
-    db.commit()
+    for payload in payloads:
+        slug = payload.get("slug", "unknown")
+
+        def _upsert_and_commit() -> None:
+            _upsert_tournament(db, payload)
+            db.commit()
+
+        try:
+            _retry_on_deadlock(_upsert_and_commit, db=db, label=f"sync:{slug}")
+            synced.append(slug)
+        except Exception as exc:
+            db.rollback()
+            logger.exception("Failed to upsert tournament %s", slug)
+            errors.append(f"{slug}: {exc}")
 
     _last_source = ",".join(sorted(sources)) if sources else "database"
     _write_sync_meta(

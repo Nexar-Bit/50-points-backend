@@ -29,6 +29,7 @@ from app.services.tournament_sync import (
     ensure_seven_races_for_tournament,
     get_last_data_source,
     get_sync_status,
+    retry_db_write_on_deadlock,
     should_auto_sync,
     sync_live_tournaments,
     track_id_from_slug,
@@ -246,8 +247,16 @@ def get_tournament(
     if not t:
         raise HTTPException(status_code=404, detail="Tournament not found")
 
-    ensure_seven_races_for_tournament(db, t)
-    db.commit()
+    def _ensure_races() -> None:
+        ensure_seven_races_for_tournament(db, t)
+        db.commit()
+
+    try:
+        retry_db_write_on_deadlock(_ensure_races, db=db, label=f"ensure-races:{slug}")
+    except Exception:
+        db.rollback()
+        logger.exception("Failed to ensure seven races for %s", slug)
+
     t = (
         db.query(Tournament)
         .options(

@@ -1,3 +1,4 @@
+import logging
 import traceback
 from contextlib import asynccontextmanager
 
@@ -25,6 +26,8 @@ from app.models import (  # noqa: F401
 from app.routers import admin, auth, groups, leaderboard, profile, races, records, statistics, tickets, tournaments
 from app.seed import ensure_seeded_if_empty
 from app.services.tournament_sync import run_sync_job, start_background_sync, stop_background_sync
+
+logger = logging.getLogger(__name__)
 
 
 def _ensure_leaderboard_columns():
@@ -65,7 +68,10 @@ async def lifespan(_app: FastAPI):
     finally:
         db.close()
 
-    await __import__("asyncio").to_thread(run_sync_job)
+    try:
+        await __import__("asyncio").to_thread(run_sync_job)
+    except Exception:
+        logger.exception("Initial racing sync failed on startup; API will continue")
     sync_task = start_background_sync()
 
     yield
