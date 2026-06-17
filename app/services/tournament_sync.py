@@ -13,6 +13,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from app.config import BACKEND_ROOT, settings
+from app.constants import RACES_PER_TOURNAMENT
 from app.database import SessionLocal
 from app.models import Horse, Race, Ticket, Tournament
 from app.services.racing_fetch import US_TRACKS, build_tournament_payload, fetch_public_track_racecards
@@ -265,7 +266,64 @@ def _upsert_tournament(db: Session, payload: dict) -> Tournament:
         db.query(Horse).filter(Horse.raceId == old_race.id).delete(synchronize_session=False)
         db.delete(old_race)
 
+    ensure_seven_races_for_tournament(db, tournament)
+
     return tournament
+
+
+def ensure_seven_races_for_tournament(db: Session, tournament: Tournament) -> bool:
+    """Guarantee races 1–7 exist so each ticket can complete 7 strategies."""
+    existing = {
+        r.raceNumber: r
+        for r in db.query(Race).filter(Race.tournamentId == tournament.id).all()
+    }
+    changed = False
+
+    for race_number in range(1, RACES_PER_TOURNAMENT + 1):
+        if race_number in existing:
+            continue
+        race = Race(
+            tournamentId=tournament.id,
+            raceNumber=race_number,
+            name=f"Race {race_number}",
+            status="upcoming",
+            scheduledTime="TBD",
+            distance=1600,
+            surface="Dirt",
+            raceClass="Open",
+            purse=0,
+        )
+        db.add(race)
+        db.flush()
+        for post in range(1, 9):
+            silk_idx = (race_number + post) % 6
+            colors = [
+                ("#e11d48", "#fbbf24"),
+                ("#2563eb", "#ffffff"),
+                ("#16a34a", "#000000"),
+                ("#7c3aed", "#f59e0b"),
+                ("#dc2626", "#1d4ed8"),
+                ("#0891b2", "#fde047"),
+            ]
+            primary, secondary = colors[silk_idx]
+            db.add(
+                Horse(
+                    raceId=race.id,
+                    postPosition=post,
+                    name=f"Runner {post}",
+                    jockey="TBA",
+                    trainer="TBA",
+                    odds=5.0 + (post % 4),
+                    silkPrimary=primary,
+                    silkSecondary=secondary,
+                )
+            )
+        changed = True
+
+    if changed:
+        tournament.totalRaces = RACES_PER_TOURNAMENT
+
+    return changed
 
 
 def sync_live_tournaments(

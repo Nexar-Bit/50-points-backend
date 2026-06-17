@@ -287,6 +287,41 @@ def fetch_public_track_racecards(
         raise
 
 
+def _placeholder_race(race_number: int) -> dict:
+    return {
+        "raceNumber": race_number,
+        "name": f"Race {race_number}",
+        "status": "upcoming",
+        "scheduledTime": "TBD",
+        "distance": 1600,
+        "surface": "Dirt",
+        "raceClass": "Open",
+        "purse": 0,
+        "horses": [
+            {
+                "postPosition": i + 1,
+                "name": f"Runner {i + 1}",
+                "jockey": "TBA",
+                "trainer": "TBA",
+                "odds": _default_odds(i),
+                "silkPrimary": DEFAULT_COLORS[i % len(DEFAULT_COLORS)][0],
+                "silkSecondary": DEFAULT_COLORS[i % len(DEFAULT_COLORS)][1],
+            }
+            for i in range(8)
+        ],
+    }
+
+
+def _pad_races_to_seven(races: list[dict]) -> list[dict]:
+    """Each ticket requires 7 races — pad when the live feed returns fewer."""
+    races = sorted(races, key=lambda r: r.get("raceNumber", 0))[:RACES_PER_TOURNAMENT]
+    by_number = {int(r.get("raceNumber", idx + 1)): r for idx, r in enumerate(races)}
+    padded: list[dict] = []
+    for n in range(1, RACES_PER_TOURNAMENT + 1):
+        padded.append(by_number.get(n) or _placeholder_race(n))
+    return padded
+
+
 def build_tournament_payload(
     track_id: str,
     races: list[dict],
@@ -297,7 +332,7 @@ def build_tournament_payload(
     slug = f"{track_id}-{race_date}"
     now = datetime.now(timezone.utc)
 
-    races = sorted(races, key=lambda r: r.get("raceNumber", 0))[:RACES_PER_TOURNAMENT]
+    races = _pad_races_to_seven(races)
     for i, r in enumerate(races, start=1):
         r["raceNumber"] = i
 

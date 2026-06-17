@@ -26,6 +26,7 @@ from app.services.tournament_display import (
 )
 from app.config import settings
 from app.services.tournament_sync import (
+    ensure_seven_races_for_tournament,
     get_last_data_source,
     get_sync_status,
     should_auto_sync,
@@ -244,6 +245,18 @@ def get_tournament(
     )
     if not t:
         raise HTTPException(status_code=404, detail="Tournament not found")
+
+    ensure_seven_races_for_tournament(db, t)
+    db.commit()
+    t = (
+        db.query(Tournament)
+        .options(
+            joinedload(Tournament.races).joinedload(Race.horses),
+            joinedload(Tournament.races).joinedload(Race.results),
+        )
+        .filter(Tournament.slug == slug)
+        .first()
+    )
 
     ticket_count = db.query(func.count(Ticket.id)).filter(Ticket.tournamentId == t.id).scalar() or 0
     races = sorted(t.races, key=lambda r: r.raceNumber)
